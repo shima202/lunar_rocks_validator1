@@ -365,7 +365,8 @@
     </div>
 
     <script>
-        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwJT2kxEw7c_MWd9aL4ijSYpIzkj4GPXW5lWZwaoDlv8aWgZqRkne_DUDkU52gvR8YJjA/exec";
+        // BURASI GÜNCELLENDİ (Yeni URL)
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw37H8fU1rcI9iSllHRdgv_aitBFd05c6yLEvZcxeYpWr2ovZp9-ZGUJxszpMcDAWwuCQ/exec";
 
         // Sistemdeki 10 Görselin Listesi
         const ALL_AVAILABLE_IMAGES = [
@@ -714,208 +715,160 @@
             const currentImgName = imagesList[0];
             if (falseNegatives[currentImgName] && falseNegatives[currentImgName].length > 0) {
                 falseNegatives[currentImgName].pop();
+                document.getElementById('overviewFnCount').textContent = falseNegatives[currentImgName].length;
                 if (metadata[currentImgName]) {
                     metadata[currentImgName].false_negatives = falseNegatives[currentImgName];
                 }
-                document.getElementById('overviewFnCount').textContent = falseNegatives[currentImgName].length;
                 drawOverviewCanvas(currentImgName);
             }
         }
 
         function proceedToIndividualRocks() {
-            isOverviewMode = false;
+            if (allRocks.length === 0) {
+                alert("Bu görselde incelenecek taş (bounding box) bulunamadı.");
+                return;
+            }
             document.getElementById('overviewContent').style.display = 'none';
             document.getElementById('mainContent').style.display = 'flex';
+            isOverviewMode = false;
             displayCurrentRock();
         }
 
         function displayCurrentRock() {
-            if (!allRocks || allRocks.length === 0) return;
-            const rock = allRocks[currentRockIndex];
-            const imgName = rock.imageName;
+            if (allRocks.length === 0) return;
+            if (currentRockIndex < 0) currentRockIndex = 0;
+            if (currentRockIndex >= allRocks.length) currentRockIndex = allRocks.length - 1;
 
+            const rockInfo = allRocks[currentRockIndex];
+            const currentImgName = rockInfo.imageName;
+            
+            document.getElementById('imageSelector').value = currentImgName;
+            document.getElementById('currentImageName').textContent = currentImgName;
             document.getElementById('currentRockNum').textContent = currentRockIndex + 1;
-            document.getElementById('currentImageName').textContent = imgName;
+            document.getElementById('rockId').textContent = rockInfo.id || (rockInfo.rockIndex + 1);
+            
+            const ann = rockInfo.annotation || rockInfo.validation_status;
+            const annStatusSpan = document.getElementById('annotationStatus');
+            annStatusSpan.className = 'annotation-status';
+            
+            if (ann) {
+                annStatusSpan.textContent = ann.toUpperCase();
+                annStatusSpan.classList.add(`status-${ann}`);
+            } else {
+                annStatusSpan.textContent = 'PENDING';
+                annStatusSpan.classList.add('status-pending');
+            }
 
-            updateRockShortcuts(imgName);
-            drawUnifiedView(imgName, rock);
-            updateRockInfo(rock, imgName);
+            const coords = getRockCoords(rockInfo);
+            document.getElementById('rockCoords').textContent = `X:${coords.sX}, Y:${coords.sY} (${coords.sW}x${coords.sH})`;
+            document.getElementById('falseNegativesCount').textContent = falseNegatives[currentImgName] ? falseNegatives[currentImgName].length : 0;
+            
+            updateRockShortcuts(currentImgName);
+            drawUnifiedCanvas(currentImgName, rockInfo, coords);
         }
 
-        function drawUnifiedView(imageName, rock) {
+        function drawUnifiedCanvas(imageName, rockInfo, coords) {
             const canvas = document.getElementById('unifiedCanvas');
             const ctx = canvas.getContext('2d');
 
-            loadOriginalImage(imageName, function(mainImg) {
-                canvas.width = mainImg.width;
-                canvas.height = mainImg.height;
-                canvas.style.width = mainImg.width + 'px';
-                canvas.style.height = mainImg.height + 'px';
-               
-                ctx.imageSmoothingEnabled = true;
-                ctx.imageSmoothingQuality = 'high';
-                ctx.drawImage(mainImg, 0, 0);
+            loadOutlinedImage(imageName, function(outlinedImg) {
+                renderUnified(canvas, ctx, outlinedImg, imageName, rockInfo, coords);
+            }, function() {
+                loadOriginalImage(imageName, function(originalImg) {
+                    renderUnified(canvas, ctx, originalImg, imageName, rockInfo, coords);
+                });
+            });
+        }
 
-                if (falseNegatives[imageName]) {
-                    falseNegatives[imageName].forEach((pt, idx) => {
+        function renderUnified(canvas, ctx, img, imageName, rockInfo, coords) {
+            const padding = 100;
+            const minSize = 250;
+            let cropW = Math.max(coords.sW + (padding * 2), minSize);
+            let cropH = Math.max(coords.sH + (padding * 2), minSize);
+            let cropX = Math.max(0, coords.sX + (coords.sW / 2) - (cropW / 2));
+            let cropY = Math.max(0, coords.sY + (coords.sH / 2) - (cropH / 2));
+
+            if (cropX + cropW > img.width) cropW = img.width - cropX;
+            if (cropY + cropH > img.height) cropH = img.height - cropY;
+            cropX = Math.max(0, cropX);
+            cropY = Math.max(0, cropY);
+
+            const displayScale = 1.2;
+            canvas.width = cropW * displayScale;
+            canvas.height = cropH * displayScale;
+
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
+
+            const maskScale = displayScale; 
+
+            // Yarı Saydam Siyah Maske ve BBox Açma
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const highlightX = (coords.sX - cropX) * maskScale;
+            const highlightY = (coords.sY - cropY) * maskScale;
+            const highlightW = coords.sW * maskScale;
+            const highlightH = coords.sH * maskScale;
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(highlightX, highlightY, highlightW, highlightH);
+            ctx.clip();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            // Hedef BBox Çizgisi
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(highlightX, highlightY, highlightW, highlightH);
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
+            ctx.fillRect(highlightX, highlightY, highlightW, highlightH);
+
+            ctx.fillStyle = '#ef4444';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.fillText(`Target: #${rockInfo.id || (rockInfo.rockIndex + 1)}`, highlightX, Math.max(12, highlightY - 5));
+
+            if (falseNegatives[imageName]) {
+                falseNegatives[imageName].forEach((pt, idx) => {
+                    const localX = (pt.x - cropX) * maskScale;
+                    const localY = (pt.y - cropY) * maskScale;
+                    
+                    if (localX >= 0 && localX <= canvas.width && localY >= 0 && localY <= canvas.height) {
                         ctx.fillStyle = '#ef4444';
                         ctx.beginPath();
-                        ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2);
+                        ctx.arc(localX, localY, 6, 0, Math.PI * 2);
                         ctx.fill();
                         ctx.strokeStyle = '#ffffff';
-                        ctx.lineWidth = 1.5;
+                        ctx.lineWidth = 2;
                         ctx.stroke();
 
                         ctx.fillStyle = '#ffffff';
-                        ctx.font = 'bold 9px sans-serif';
-                        ctx.fillText(idx + 1, pt.x + 8, pt.y - 4);
-                    });
-                }
-               
-                const { sX, sY, sW, sH } = getRockCoords(rock);
-
-                ctx.strokeStyle = '#ef4444';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(sX, sY, sW, sH);
-
-                const popW = 190;
-                const popH = 150;
-                const gap = 12;
-                const totalZoomW = (popW * 2) + gap;
-                const targetAspect = popW / popH;
-
-                let baseSize = Math.max(sW, sH) * 3.5;
-                baseSize = Math.max(baseSize, 50);
-
-                let cropH = baseSize;
-                let cropW = cropH * targetAspect;
-
-                let centerX = sX + (sW / 2);
-                let centerY = sY + (sH / 2);
-
-                let cropX = centerX - (cropW / 2);
-                let cropY = centerY - (cropH / 2);
-
-                if (cropX < 0) cropX = 0;
-                if (cropY < 0) cropY = 0;
-                if (cropX + cropW > mainImg.width) cropX = mainImg.width - cropW;
-                if (cropY + cropH > mainImg.height) cropY = mainImg.height - cropH;
-
-                const rockArea = { x: sX - 15, y: sY - 15, w: sW + 30, h: sH + 30 };
-
-                const candidatePositions = [
-                    { x: 20, y: mainImg.height - popH - 20 },
-                    { x: mainImg.width - totalZoomW - 20, y: mainImg.height - popH - 20 },
-                    { x: 20, y: 30 },
-                    { x: mainImg.width - totalZoomW - 20, y: 30 }
-                ];
-
-                function isOverlap(r1, r2) {
-                    return !(r2.x > r1.x + r1.w || 
-                             r2.x + r2.w < r1.x || 
-                             r2.y > r1.y + r1.h || 
-                             r2.y + r2.h < r1.y);
-                }
-
-                let bestPos = candidatePositions[0];
-                for (let pos of candidatePositions) {
-                    let zoomArea = { x: pos.x, y: pos.y, w: totalZoomW, h: popH };
-                    if (!isOverlap(rockArea, zoomArea)) {
-                        bestPos = pos;
-                        break;
+                        ctx.font = 'bold 10px sans-serif';
+                        ctx.fillText(idx + 1, localX + 9, localY - 4);
                     }
-                }
-
-                let popX1 = bestPos.x;
-                let popY1 = bestPos.y;
-                let popX2 = popX1 + popW + gap;
-                let popY2 = popY1;
-
-                ctx.strokeStyle = 'rgba(239, 68, 68, 0.6)';
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.moveTo(sX + (sW / 2), sY + (sH / 2));
-                ctx.lineTo(popX1 + (totalZoomW / 2), popY1 + (popH / 2));
-                ctx.stroke();
-
-                // RAW ZOOM
-                ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-                ctx.fillRect(popX1 - 2, popY1 - 20, popW + 4, popH + 24);
-                
-                ctx.drawImage(mainImg, cropX, cropY, cropW, cropH, popX1, popY1, popW, popH);
-                
-                ctx.strokeStyle = '#3b82f6';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(popX1, popY1, popW, popH);
-
-                ctx.fillStyle = '#60a5fa';
-                ctx.font = 'bold 10px sans-serif';
-                ctx.fillText('🔍 RAW (Context Zoom)', popX1 + 4, popY1 - 5);
-
-                let scaleX = popW / cropW;
-                let scaleY = popH / cropH;
-                let targetZoomX1 = popX1 + (sX - cropX) * scaleX;
-                let targetZoomY1 = popY1 + (sY - cropY) * scaleY;
-                let targetZoomW = sW * scaleX;
-                let targetZoomH = sH * scaleY;
-
-                ctx.strokeStyle = '#f59e0b';
-                ctx.lineWidth = 2;
-                ctx.setLineDash([4, 2]);
-                ctx.strokeRect(targetZoomX1, targetZoomY1, targetZoomW, targetZoomH);
-                ctx.setLineDash([]);
-
-                // OUTLINE ZOOM
-                ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-                ctx.fillRect(popX2 - 2, popY2 - 20, popW + 4, popH + 24);
-
-                ctx.strokeStyle = '#ef4444';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(popX2, popY2, popW, popH);
-
-                ctx.fillStyle = '#f87171';
-                ctx.font = 'bold 10px sans-serif';
-                ctx.fillText('🎯 OUTLINE (Target Zoom)', popX2 + 4, popY2 - 5);
-
-                ctx.drawImage(mainImg, cropX, cropY, cropW, cropH, popX2, popY2, popW, popH);
-
-                if (rock.outline && Array.isArray(rock.outline) && rock.outline.length > 0) {
-                    ctx.save();
-                    ctx.beginPath();
-                    rock.outline.forEach((pt, i) => {
-                        let px = popX2 + (pt[0] - cropX) * scaleX;
-                        let py = popY2 + (pt[1] - cropY) * scaleY;
-                        if (i === 0) ctx.moveTo(px, py);
-                        else ctx.lineTo(px, py);
-                    });
-                    ctx.closePath();
-                    ctx.strokeStyle = '#22c55e';
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
-                    ctx.restore();
-                } else {
-                    let targetZoomX2 = popX2 + (sX - cropX) * scaleX;
-                    let targetZoomY2 = popY2 + (sY - cropY) * scaleY;
-                    ctx.strokeStyle = '#22c55e';
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(targetZoomX2, targetZoomY2, targetZoomW, targetZoomH);
-                }
-            });
+                });
+            }
 
             canvas.onclick = (e) => {
                 const rect = canvas.getBoundingClientRect();
                 const scaleX = canvas.width / rect.width;
                 const scaleY = canvas.height / rect.height;
-                const x = Math.round((e.clientX - rect.left) * scaleX);
-                const y = Math.round((e.clientY - rect.top) * scaleY);
-               
+                const localClickX = (e.clientX - rect.left) * scaleX;
+                const localClickY = (e.clientY - rect.top) * scaleY;
+
+                const globalX = Math.round((localClickX / maskScale) + cropX);
+                const globalY = Math.round((localClickY / maskScale) + cropY);
+
                 if (!falseNegatives[imageName]) falseNegatives[imageName] = [];
-                falseNegatives[imageName].push({ x: x, y: y });
-               
+                falseNegatives[imageName].push({ x: globalX, y: globalY });
+                
                 if (metadata[imageName]) {
                     metadata[imageName].false_negatives = falseNegatives[imageName];
                 }
 
+                document.getElementById('falseNegativesCount').textContent = falseNegatives[imageName].length;
                 displayCurrentRock();
             };
 
@@ -926,60 +879,46 @@
         }
 
         function removeLastPoint() {
-            if (!allRocks || allRocks.length === 0) return;
-            const currentImageName = allRocks[currentRockIndex].imageName;
-
-            if (falseNegatives[currentImageName] && falseNegatives[currentImageName].length > 0) {
-                falseNegatives[currentImageName].pop();
-                if (metadata[currentImageName]) {
-                    metadata[currentImageName].false_negatives = falseNegatives[currentImageName];
+            if (allRocks.length === 0) return;
+            const currentImgName = allRocks[currentRockIndex].imageName;
+            
+            if (falseNegatives[currentImgName] && falseNegatives[currentImgName].length > 0) {
+                falseNegatives[currentImgName].pop();
+                document.getElementById('falseNegativesCount').textContent = falseNegatives[currentImgName].length;
+                
+                if (metadata[currentImgName]) {
+                    metadata[currentImgName].false_negatives = falseNegatives[currentImgName];
                 }
+                
                 displayCurrentRock();
             }
         }
 
-        function updateRockInfo(rock, imageName) {
-            document.getElementById('rockId').textContent = rock.id || (currentRockIndex + 1);
+        function annotateRock(status) {
+            if (allRocks.length === 0) return;
             
-            const { sX, sY, sW, sH } = getRockCoords(rock);
-            document.getElementById('rockCoords').textContent = `[${sX}, ${sY}] ${sW}×${sH}`;
-
-            const statusEl = document.getElementById('annotationStatus');
-            statusEl.className = 'annotation-status';
-            const ann = rock.annotation || rock.validation_status;
-            if (ann === 'yes') { statusEl.classList.add('status-yes'); statusEl.textContent = '✓ YES'; }
-            else if (ann === 'no') { statusEl.classList.add('status-no'); statusEl.textContent = '✗ NO'; }
-            else if (ann === 'review') { statusEl.classList.add('status-review'); statusEl.textContent = '⟳ REVIEW'; }
-            else { statusEl.classList.add('status-pending'); statusEl.textContent = 'PENDING'; }
-
-            document.getElementById('falseNegativesCount').textContent = falseNegatives[imageName]?.length || 0;
-        }
-
-        function annotateRock(value) {
-            if (!allRocks || currentRockIndex >= allRocks.length) return;
-            const rock = allRocks[currentRockIndex];
+            const rockInfo = allRocks[currentRockIndex];
+            rockInfo.annotation = status;
+            rockInfo.validation_status = status;
             
-            let imgDataContainer = metadata[rock.imageName];
-            let rocksArray = imgDataContainer.rocks || imgDataContainer.annotations || [];
-
-            if (rocksArray && rocksArray[rock.rockIndex]) {
-                rocksArray[rock.rockIndex].annotation = value;
-                rocksArray[rock.rockIndex].validation_status = value;
+            const realImgObj = metadata[rockInfo.imageName];
+            if (realImgObj) {
+                let realRockArray = realImgObj.rocks || realImgObj.annotations;
+                if (realRockArray && realRockArray[rockInfo.rockIndex]) {
+                    realRockArray[rockInfo.rockIndex].validation_status = status;
+                    realRockArray[rockInfo.rockIndex].annotation = status;
+                }
             }
-            rock.annotation = value;
-            rock.validation_status = value;
             
-            updateRockInfo(rock, rock.imageName);
-            setTimeout(() => nextRock(), 150);
-        }
-
-        function nextRock() {
+            saveUserProgress();
+            
             if (currentRockIndex < allRocks.length - 1) {
                 currentRockIndex++;
                 saveUserProgress();
                 displayCurrentRock();
             } else {
-                alert('Sana atanan bu fotoğraftaki tüm taşlar incelendi! "Submit" butonuna basarak sonuçları gönderebilirsin.');
+                displayCurrentRock();
+                alert(`Tebrikler ${loggedInUser.toUpperCase()}! Atanan görseldeki (${assignedImage}) tüm taşları tamamladınız.\n\nLütfen Submit butonuna basarak verilerinizi Google Drive'a kaydedin.`);
             }
         }
 
@@ -991,48 +930,81 @@
             }
         }
 
-        function exportAnnotations() {
-            Object.keys(falseNegatives).forEach(imgName => {
-                if (metadata[imgName]) {
-                    metadata[imgName].false_negatives = falseNegatives[imgName];
-                }
-            });
-
-            const json = JSON.stringify(metadata, null, 2);
-            const blob = new Blob([json], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `sam_annotations_${loggedInUser.replace(/\s+/g, '_')}.json`;
-            a.click();
+        function nextRock() {
+            if (currentRockIndex < allRocks.length - 1) {
+                currentRockIndex++;
+                saveUserProgress();
+                displayCurrentRock();
+            } else {
+                alert(`Tebrikler ${loggedInUser.toUpperCase()}! Atanan görseldeki tüm taşları tamamladınız.\n\nLütfen Submit butonuna basarak verilerinizi merkeze kaydedin.`);
+            }
         }
 
         function generateFullReportText() {
-            let report = `MOON ROCKS SAM FALSE NEGATIVES & VALIDATION REPORT\nValidator: ${loggedInUser}\nAssigned Image: ${assignedImage}\n=======================================\n\n`;
+            if (!assignedImage || !metadata[assignedImage]) return "Rapor oluşturulacak veri bulunamadı.";
             
-            if (!allRocks || allRocks.length === 0) {
-                report += 'No data.\n';
-            } else {
-                let imgName = imagesList[0];
-                report += `Image: ${imgName}\n`;
-                report += `Total Model Rocks: ${allRocks.length}\n`;
+            let currentImgName = assignedImage;
+            let currentImageObj = metadata[currentImgName];
+            let rocksArr = currentImageObj.rocks || currentImageObj.annotations || [];
+            
+            let total = rocksArr.length;
+            let yesCount = 0, noCount = 0, reviewCount = 0, pendingCount = 0;
+            
+            let detaySatirlari = [];
+            
+            rocksArr.forEach((r, idx) => {
+                let sX = 0, sY = 0;
+                if (r.bbox) { sX = Math.round(r.bbox[0]); sY = Math.round(r.bbox[1]); }
+                else if (r.box) { sX = Math.round(r.box[0]); sY = Math.round(r.box[1]); }
+                else { sX = Math.round(r.x || r.xmin || 0); sY = Math.round(r.y || r.ymin || 0); }
                 
-                allRocks.forEach((rock) => {
-                    const { sX, sY, sW, sH } = getRockCoords(rock);
-                    report += `  - Rock #${rock.id || (rock.rockIndex + 1)}: Status: ${rock.annotation || rock.validation_status || 'PENDING'} | BBox: [X: ${sX}, Y: ${sY}, Width: ${sW}, Height: ${sH}]\n`;
+                let ann = r.validation_status || r.annotation || "pending";
+                
+                if (ann === 'yes') yesCount++;
+                else if (ann === 'no') noCount++;
+                else if (ann === 'review') reviewCount++;
+                else pendingCount++;
+                
+                detaySatirlari.push(`  Tas #${r.id || (idx+1)} [X:${sX}, Y:${sY}] - Durum: ${ann.toUpperCase()}`);
+            });
+            
+            let fnCount = (currentImageObj.false_negatives && Array.isArray(currentImageObj.false_negatives)) ? currentImageObj.false_negatives.length : 0;
+            
+            let txt = `==========================================================\n`;
+            txt += `MOON ROCKS VALIDATOR - OTO-RAPOR (Team Edition)\n`;
+            txt += `==========================================================\n`;
+            txt += `Kullanici Adi : ${loggedInUser.toUpperCase()}\n`;
+            txt += `Atanan Gorsel : ${currentImgName}\n`;
+            txt += `Tarih / Saat  : ${new Date().toLocaleString()}\n`;
+            txt += `==========================================================\n\n`;
+            
+            txt += `[ GENEL OZET ]\n`;
+            txt += `- Toplam Tespit Edilen Tas: ${total}\n`;
+            txt += `- Dogru Tespitler (YES):    ${yesCount}\n`;
+            txt += `- Hatali Tespitler (NO):    ${noCount}\n`;
+            txt += `- Supheli Tespitler (REV):  ${reviewCount}\n`;
+            txt += `- Bakilmayan (PENDING):     ${pendingCount}\n`;
+            txt += `- Gecilmeyen Taslar (FN):   ${fnCount}\n\n`;
+            
+            txt += `[ DETAYLI TAS LİSTESİ ]\n`;
+            txt += detaySatirlari.join("\n") + "\n\n";
+            
+            if (fnCount > 0) {
+                txt += `[ KACIRILAN TASLARIN (FN) KOORDINATLARI ]\n`;
+                currentImageObj.false_negatives.forEach((fn, fidx) => {
+                    txt += `  FN #${fidx+1} -> X: ${fn.x}, Y: ${fn.y}\n`;
                 });
-
-                const currentFn = falseNegatives[imgName] || [];
-                if (currentFn.length > 0) {
-                    report += `False Negatives (Point Prompts - ${currentFn.length}):\n`;
-                    currentFn.forEach((pt, ptIdx) => {
-                        report += `  - Point #${ptIdx+1}: [X: ${pt.x}, Y: ${pt.y}]\n`;
-                    });
-                }
+                txt += "\n";
             }
-            return report;
+            
+            txt += `==========================================================\n`;
+            txt += `Rapor Sonu\n`;
+            txt += `==========================================================\n`;
+            
+            return txt;
         }
 
+        // BURASI GÜNCELLENDİ (CORS UYUMLU GÖNDERİM)
         async function gopturSheetsGonder() {
             Object.keys(falseNegatives).forEach(imgName => {
                 if (metadata[imgName]) {
@@ -1047,31 +1019,62 @@
                 report_text: reportText
             };
 
-            document.getElementById('status').textContent = "Veriler ve rapor Google E-Tabloya gönderiliyor...";
+            document.getElementById('status').textContent = "Dosyalar merkeze gönderiliyor...";
 
             try {
+                // CORS hatasını önlemek için text/plain kullanıyoruz
                 let response = await fetch(WEB_APP_URL, {
                     method: "POST",
+                    headers: {
+                        "Content-Type": "text/plain;charset=utf-8"
+                    },
                     body: JSON.stringify(payload)
                 });
+                
                 let sonuc = await response.json();
-                document.getElementById('status').textContent = "✓ İşlem başarılı! Rapor kaydedildi.";
-                alert(`Tebrikler ${loggedInUser.toUpperCase()}! Sonuçların ve detaylı raporun başarıyla gönderildi.`);
+                
+                if (sonuc.status === "success" || sonuc.status === undefined) {
+                    document.getElementById('status').textContent = "✓ İşlem başarılı! Dosyalar kaydedildi.";
+                    alert(`Tebrikler ${loggedInUser.toUpperCase()}! Sonuçların başarıyla gönderildi.`);
+                } else {
+                    throw new Error(sonuc.message || "Bilinmeyen sunucu hatası");
+                }
             } catch (error) {
                 document.getElementById('status').textContent = "✗ Gönderim sırasında hata oluştu!";
-                alert("Gönderim hatası: " + error);
+                alert("Gönderim hatası: " + error.message);
             }
         }
 
+        function exportAnnotations() {
+            Object.keys(falseNegatives).forEach(imgName => {
+                if (metadata[imgName]) {
+                    metadata[imgName].false_negatives = falseNegatives[imgName];
+                }
+            });
+
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(metadata, null, 2));
+            const dlAnchorElem = document.createElement('a');
+            dlAnchorElem.setAttribute("href", dataStr);
+            dlAnchorElem.setAttribute("download", `moon_rocks_data_${assignedImage}_${loggedInUser.replace(/[^a-zA-Z0-9]/g, '_')}.json`);
+            dlAnchorElem.click();
+            document.getElementById('status').textContent = "✓ JSON dosyası indirildi.";
+        }
+
         function exportReport() {
-            let report = generateFullReportText();
-            
-            const blob = new Blob([report], { type: 'text/plain' });
+            Object.keys(falseNegatives).forEach(imgName => {
+                if (metadata[imgName]) {
+                    metadata[imgName].false_negatives = falseNegatives[imgName];
+                }
+            });
+            const reportText = generateFullReportText();
+            const blob = new Blob([reportText], { type: "text/plain;charset=utf-8" });
             const url = URL.createObjectURL(blob);
-            const aElem = document.createElement('a');
-            aElem.href = url;
-            aElem.download = `sam_report_${loggedInUser.replace(/\s+/g, '_')}.txt`;
-            aElem.click();
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `moon_rocks_rapor_${assignedImage}_${loggedInUser.replace(/[^a-zA-Z0-9]/g, '_')}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+            document.getElementById('status').textContent = "✓ Rapor TXT olarak indirildi.";
         }
     </script>
 </body>
