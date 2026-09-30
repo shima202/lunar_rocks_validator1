@@ -1006,8 +1006,7 @@
             a.download = `sam_annotations_${loggedInUser.replace(/\s+/g, '_')}.json`;
             a.click();
         }
-
-        function generateFullReportText() {
+function generateFullReportText() {
     let packageName = "Paket_1"; // Varsayılan paket adı
     let report = `MOON ROCKS SAM FALSE NEGATIVES & VALIDATION REPORT\n`;
     report += `Validator: ${loggedInUser}\n`;
@@ -1083,29 +1082,6 @@ async function gopturSheetsGonder() {
         alert("Gönderim hatası: " + error.message);
     }
 }
-
-            const reportText = generateFullReportText();
-            const payload = {
-                validator_name: loggedInUser,
-                data: metadata,
-                report_text: reportText
-            };
-
-            document.getElementById('status').textContent = "Veriler ve rapor Google E-Tabloya gönderiliyor...";
-
-            try {
-                let response = await fetch(WEB_APP_URL, {
-                    method: "POST",
-                    body: JSON.stringify(payload)
-                });
-                let sonuc = await response.json();
-                document.getElementById('status').textContent = "✓ İşlem başarılı! Rapor kaydedildi.";
-                alert(`Tebrikler ${loggedInUser.toUpperCase()}! Sonuçların ve detaylı raporun başarıyla gönderildi.`);
-            } catch (error) {
-                document.getElementById('status').textContent = "✗ Gönderim sırasında hata oluştu!";
-                alert("Gönderim hatası: " + error);
-            }
-        }
 
         function exportReport() {
             let report = generateFullReportText();
