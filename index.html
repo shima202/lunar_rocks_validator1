@@ -266,7 +266,7 @@
             <h2>🌙 Moon Rocks Validator</h2>
             <p>Lütfen adınızı girin. Tarafınıza otomatik olarak 1 adet özel fotoğraf atanacak ve çalışmaya başlayacaksınız.</p>
             <input type="text" id="userNameInput" placeholder="Ad Soyad" autocomplete="off" onkeypress="if(event.key === 'Enter') handleUserLogin()">
-            <button onclick="handleUserLogin()">Sisteme Giriş Yap →</button>
+            <button id="loginBtn" onclick="handleUserLogin()">Sisteme Giriş Yap →</button>
         </div>
     </div>
 
@@ -365,13 +365,7 @@
     </div>
 
     <script>
-        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwcbT3N75M7DaSIFXQCb4acukCPPR_v4Ds43FBGV_gwF-__rqAz8Wqi5GOBaR3EvgaTWg/exec";
-
-        // Sistemdeki 10 Görselin Listesi
-        const ALL_AVAILABLE_IMAGES = [
-            "render0010.png", "render0011.png", "render0012.png", "render0013.png", "render0014.png",
-            "render0015.png", "render0016.png", "render0017.png", "render0018.png", "render0019.png"
-        ];
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwJT2kxEw7c_MWd9aL4ijSYpIzkj4GPXW5lWZwaoDlv8aWgZqRkne_DUDkU52gvR8YJjA/exec";
 
         let metadata = null;
         let loggedInUser = "";
@@ -420,47 +414,47 @@
             }
             loggedInUser = inputVal;
 
-            let userAssignments = JSON.parse(localStorage.getItem('lunar_single_img_user_assignments') || '{}');
-            let imageStatus = JSON.parse(localStorage.getItem('lunar_single_img_status') || '{}');
+            const loginBtn = document.getElementById('loginBtn');
+            loginBtn.disabled = true;
+            loginBtn.textContent = "Fotoğraf Atanıyor...";
 
-            if (userAssignments[loggedInUser]) {
-                assignedImage = userAssignments[loggedInUser].image;
-                currentRockIndex = userAssignments[loggedInUser].currentRockIndex || 0;
-            } else {
-                const freeImage = ALL_AVAILABLE_IMAGES.find(img => !imageStatus[img]);
-                
-                if (!freeImage) {
-                    alert('Sistemdeki tüm fotoğraflar (10/10) şu anda farklı kullanıcılara atanmış durumda!');
+            try {
+                // Google Sheets'ten kilitli (LockService) fotoğraf ataması al
+                let response = await fetch(WEB_APP_URL, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        action: "getAssignment",
+                        username: loggedInUser
+                    })
+                });
+
+                let result = await response.json();
+
+                if (result.status === "error") {
+                    alert("Giriş Hatası:\n" + result.message);
+                    loginBtn.disabled = false;
+                    loginBtn.textContent = "Sisteme Giriş Yap →";
                     return;
                 }
 
-                assignedImage = freeImage;
+                assignedImage = result.image;
                 currentRockIndex = 0;
 
-                userAssignments[loggedInUser] = {
-                    image: assignedImage,
-                    currentRockIndex: 0
-                };
-                imageStatus[assignedImage] = loggedInUser;
+                document.getElementById('currentUserBadge').textContent = `Kullanıcı: ${loggedInUser.toUpperCase()} | Fotoğraf: ${assignedImage}`;
+                document.getElementById('loginModal').style.display = 'none';
+                document.getElementById('loadingState').style.display = 'block';
 
-                localStorage.setItem('lunar_single_img_user_assignments', JSON.stringify(userAssignments));
-                localStorage.setItem('lunar_single_img_status', JSON.stringify(imageStatus));
+                await loadUserData();
+
+            } catch (error) {
+                alert("Sunucuya bağlanırken hata oluştu:\n" + error.message);
+                loginBtn.disabled = false;
+                loginBtn.textContent = "Sisteme Giriş Yap →";
             }
-
-            document.getElementById('currentUserBadge').textContent = `Kullanıcı: ${loggedInUser.toUpperCase()} | Fotoğraf: ${assignedImage}`;
-            document.getElementById('loginModal').style.display = 'none';
-            document.getElementById('loadingState').style.display = 'block';
-
-            await loadUserData();
         }
 
         function saveUserProgress() {
-            let userAssignments = JSON.parse(localStorage.getItem('lunar_single_img_user_assignments') || '{}');
-            if (!userAssignments[loggedInUser]) {
-                userAssignments[loggedInUser] = { image: assignedImage };
-            }
-            userAssignments[loggedInUser].currentRockIndex = currentRockIndex;
-            localStorage.setItem('lunar_single_img_user_assignments', JSON.stringify(userAssignments));
+            // İlerleme yerel olarak saklanabilir
         }
 
         async function loadUserData() {
@@ -473,7 +467,6 @@
 
                 let rawData = await res.json();
                 
-                // Anahtarı bul (uzantılı veya uzantısız olma ihtimaline karşı)
                 let matchedKey = Object.keys(rawData).find(k => k.includes(assignedImage.replace('.png', '')) || assignedImage.includes(k));
                 if (!matchedKey) throw new Error(`${assignedImage} için JSON verisi bulunamadı!`);
 
@@ -1006,82 +999,80 @@
             a.download = `sam_annotations_${loggedInUser.replace(/\s+/g, '_')}.json`;
             a.click();
         }
-function generateFullReportText() {
-    let packageName = "Paket_1"; // Varsayılan paket adı
-    let report = `MOON ROCKS SAM FALSE NEGATIVES & VALIDATION REPORT\n`;
-    report += `Validator: ${loggedInUser}\n`;
-    report += `Package: ${packageName}\n`;
-    report += `=======================================\n\n`;
-    
-    if (!allRocks || allRocks.length === 0) {
-        report += 'No data.\n';
-    } else {
-        let imgName = imagesList[0] || assignedImage;
-        report += `Image: ${imgName}\n`;
-        report += `Total Model Rocks: ${allRocks.length}\n`;
-        
-        allRocks.forEach((rock) => {
-            const { sX, sY, sW, sH } = getRockCoords(rock);
-            const status = rock.annotation || rock.validation_status || 'PENDING';
-            const rockId = rock.id || (rock.rockIndex + 1);
+
+        function generateFullReportText() {
+            let packageName = "Paket_1";
+            let report = `MOON ROCKS SAM FALSE NEGATIVES & VALIDATION REPORT\n`;
+            report += `Validator: ${loggedInUser}\n`;
+            report += `Package: ${packageName}\n`;
+            report += `=======================================\n\n`;
             
-            // 1. Satır: Rock bilgisi ve BBox
-            report += `- Rock #${rockId}: Status: ${status} | BBox: [X: ${sX}, Y: ${sY}, Width: ${sW}, Height: ${sH}]\n`;
-            
-            // 2. Satır: Outline Points (Eğer nesnede outline varsa)
-            if (rock.outline && Array.isArray(rock.outline) && rock.outline.length > 0) {
-                const pointsStr = rock.outline.map(pt => `[${pt[0]},${pt[1]}]`).join(', ');
-                report += `  Outline Points: ${pointsStr}\n`;
+            if (!allRocks || allRocks.length === 0) {
+                report += 'No data.\n';
+            } else {
+                let imgName = imagesList[0] || assignedImage;
+                report += `Image: ${imgName}\n`;
+                report += `Total Model Rocks: ${allRocks.length}\n`;
+                
+                allRocks.forEach((rock) => {
+                    const { sX, sY, sW, sH } = getRockCoords(rock);
+                    const status = rock.annotation || rock.validation_status || 'PENDING';
+                    const rockId = rock.id || (rock.rockIndex + 1);
+                    
+                    report += `  - Rock #${rockId}: Status: ${status} | BBox: [X: ${sX}, Y: ${sY}, Width: ${sW}, Height: ${sH}]\n`;
+                    
+                    if (rock.outline && Array.isArray(rock.outline) && rock.outline.length > 0) {
+                        const pointsStr = rock.outline.map(pt => `[${pt[0]},${pt[1]}]`).join(', ');
+                        report += `    Outline Points: ${pointsStr}\n`;
+                    }
+                });
+
+                const currentFn = falseNegatives[imgName] || [];
+                if (currentFn.length > 0) {
+                    report += `\nFalse Negatives (Point Prompts - ${currentFn.length}):\n`;
+                    currentFn.forEach((pt, ptIdx) => {
+                        report += `  - Point #${ptIdx + 1}: [X: ${pt.x}, Y: ${pt.y}]\n`;
+                    });
+                }
             }
-        });
+            return report;
+        }
 
-        // False Negatives (Kullanıcının elle eklediği eksik taşlar)
-        const currentFn = falseNegatives[imgName] || [];
-        if (currentFn.length > 0) {
-            report += `\nFalse Negatives (Point Prompts - ${currentFn.length}):\n`;
-            currentFn.forEach((pt, ptIdx) => {
-                report += `  - Point #${ptIdx + 1}: [X: ${pt.x}, Y: ${pt.y}]\n`;
+        async function gopturSheetsGonder() {
+            Object.keys(falseNegatives).forEach(imgName => {
+                if (metadata[imgName]) {
+                    metadata[imgName].false_negatives = falseNegatives[imgName];
+                }
             });
+
+            const reportText = generateFullReportText();
+            const payload = {
+                validator_name: loggedInUser,
+                assigned_image: assignedImage,
+                data: metadata,
+                report_text: reportText
+            };
+
+            document.getElementById('status').textContent = "Rapor Drive'a yükleniyor ve E-Tabloya kaydediliyor...";
+
+            try {
+                let response = await fetch(WEB_APP_URL, {
+                    method: "POST",
+                    body: JSON.stringify(payload)
+                });
+                let sonuc = await response.json();
+                
+                if (sonuc.status === "success") {
+                    document.getElementById('status').textContent = "✓ İşlem başarılı! Rapor Drive'a yüklendi.";
+                    alert(`Tebrikler ${loggedInUser.toUpperCase()}!\n\nRapor Drive'a kaydedildi ve E-Tabloya eklendi.\nDrive Linki: ${sonuc.file_url}`);
+                } else {
+                    throw new Error(sonuc.message || "Bilinmeyen sunucu hatası");
+                }
+            } catch (error) {
+                document.getElementById('status').textContent = "✗ Gönderim sırasında hata oluştu!";
+                alert("Gönderim hatası: " + error.message);
+            }
         }
-    }
-    return report;
-}
-
-async function gopturSheetsGonder() {
-    Object.keys(falseNegatives).forEach(imgName => {
-        if (metadata[imgName]) {
-            metadata[imgName].false_negatives = falseNegatives[imgName];
-        }
-    });
-
-    const reportText = generateFullReportText();
-    const payload = {
-        validator_name: loggedInUser,
-        assigned_image: assignedImage,
-        data: metadata,
-        report_text: reportText
-    };
-
-    document.getElementById('status').textContent = "Rapor Drive'a yükleniyor ve E-Tabloya kaydediliyor...";
-
-    try {
-        let response = await fetch(WEB_APP_URL, {
-            method: "POST",
-            body: JSON.stringify(payload)
-        });
-        let sonuc = await response.json();
-        
-        if (sonuc.status === "success") {
-            document.getElementById('status').textContent = "✓ İşlem başarılı! Rapor Drive'a yüklendi.";
-            alert(`Tebrikler ${loggedInUser.toUpperCase()}!\n\nRapor Drive'a kaydedildi ve E-Tabloya eklendi.\nDrive Linki: ${sonuc.file_url}`);
-        } else {
-            throw new Error(sonuc.message || "Bilinmeyen sunucu hatası");
-        }
-    } catch (error) {
-        document.getElementById('status').textContent = "✗ Gönderim sırasında hata oluştu!";
-        alert("Gönderim hatası: " + error.message);
-    }
-}
 
         function exportReport() {
             let report = generateFullReportText();
