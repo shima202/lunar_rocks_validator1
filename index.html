@@ -365,7 +365,7 @@
     </div>
 
     <script>
-        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwJT2kxEw7c_MWd9aL4ijSYpIzkj4GPXW5lWZwaoDlv8aWgZqRkne_DUDkU52gvR8YJjA/exec";
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwcbT3N75M7DaSIFXQCb4acukCPPR_v4Ds43FBGV_gwF-__rqAz8Wqi5GOBaR3EvgaTWg/exec";
 
         // Sistemdeki 10 Görselin Listesi
         const ALL_AVAILABLE_IMAGES = [
@@ -1008,37 +1008,81 @@
         }
 
         function generateFullReportText() {
-            let report = `MOON ROCKS SAM FALSE NEGATIVES & VALIDATION REPORT\nValidator: ${loggedInUser}\nAssigned Image: ${assignedImage}\n=======================================\n\n`;
+    let packageName = "Paket_1"; // Varsayılan paket adı
+    let report = `MOON ROCKS SAM FALSE NEGATIVES & VALIDATION REPORT\n`;
+    report += `Validator: ${loggedInUser}\n`;
+    report += `Package: ${packageName}\n`;
+    report += `=======================================\n\n`;
+    
+    if (!allRocks || allRocks.length === 0) {
+        report += 'No data.\n';
+    } else {
+        let imgName = imagesList[0] || assignedImage;
+        report += `Image: ${imgName}\n`;
+        report += `Total Model Rocks: ${allRocks.length}\n`;
+        
+        allRocks.forEach((rock) => {
+            const { sX, sY, sW, sH } = getRockCoords(rock);
+            const status = rock.annotation || rock.validation_status || 'PENDING';
+            const rockId = rock.id || (rock.rockIndex + 1);
             
-            if (!allRocks || allRocks.length === 0) {
-                report += 'No data.\n';
-            } else {
-                let imgName = imagesList[0];
-                report += `Image: ${imgName}\n`;
-                report += `Total Model Rocks: ${allRocks.length}\n`;
-                
-                allRocks.forEach((rock) => {
-                    const { sX, sY, sW, sH } = getRockCoords(rock);
-                    report += `  - Rock #${rock.id || (rock.rockIndex + 1)}: Status: ${rock.annotation || rock.validation_status || 'PENDING'} | BBox: [X: ${sX}, Y: ${sY}, Width: ${sW}, Height: ${sH}]\n`;
-                });
-
-                const currentFn = falseNegatives[imgName] || [];
-                if (currentFn.length > 0) {
-                    report += `False Negatives (Point Prompts - ${currentFn.length}):\n`;
-                    currentFn.forEach((pt, ptIdx) => {
-                        report += `  - Point #${ptIdx+1}: [X: ${pt.x}, Y: ${pt.y}]\n`;
-                    });
-                }
+            // 1. Satır: Rock bilgisi ve BBox
+            report += `- Rock #${rockId}: Status: ${status} | BBox: [X: ${sX}, Y: ${sY}, Width: ${sW}, Height: ${sH}]\n`;
+            
+            // 2. Satır: Outline Points (Eğer nesnede outline varsa)
+            if (rock.outline && Array.isArray(rock.outline) && rock.outline.length > 0) {
+                const pointsStr = rock.outline.map(pt => `[${pt[0]},${pt[1]}]`).join(', ');
+                report += `  Outline Points: ${pointsStr}\n`;
             }
-            return report;
-        }
+        });
 
-        async function gopturSheetsGonder() {
-            Object.keys(falseNegatives).forEach(imgName => {
-                if (metadata[imgName]) {
-                    metadata[imgName].false_negatives = falseNegatives[imgName];
-                }
+        // False Negatives (Kullanıcının elle eklediği eksik taşlar)
+        const currentFn = falseNegatives[imgName] || [];
+        if (currentFn.length > 0) {
+            report += `\nFalse Negatives (Point Prompts - ${currentFn.length}):\n`;
+            currentFn.forEach((pt, ptIdx) => {
+                report += `  - Point #${ptIdx + 1}: [X: ${pt.x}, Y: ${pt.y}]\n`;
             });
+        }
+    }
+    return report;
+}
+
+async function gopturSheetsGonder() {
+    Object.keys(falseNegatives).forEach(imgName => {
+        if (metadata[imgName]) {
+            metadata[imgName].false_negatives = falseNegatives[imgName];
+        }
+    });
+
+    const reportText = generateFullReportText();
+    const payload = {
+        validator_name: loggedInUser,
+        assigned_image: assignedImage,
+        data: metadata,
+        report_text: reportText
+    };
+
+    document.getElementById('status').textContent = "Rapor Drive'a yükleniyor ve E-Tabloya kaydediliyor...";
+
+    try {
+        let response = await fetch(WEB_APP_URL, {
+            method: "POST",
+            body: JSON.stringify(payload)
+        });
+        let sonuc = await response.json();
+        
+        if (sonuc.status === "success") {
+            document.getElementById('status').textContent = "✓ İşlem başarılı! Rapor Drive'a yüklendi.";
+            alert(`Tebrikler ${loggedInUser.toUpperCase()}!\n\nRapor Drive'a kaydedildi ve E-Tabloya eklendi.\nDrive Linki: ${sonuc.file_url}`);
+        } else {
+            throw new Error(sonuc.message || "Bilinmeyen sunucu hatası");
+        }
+    } catch (error) {
+        document.getElementById('status').textContent = "✗ Gönderim sırasında hata oluştu!";
+        alert("Gönderim hatası: " + error.message);
+    }
+}
 
             const reportText = generateFullReportText();
             const payload = {
